@@ -1,0 +1,974 @@
+---
+title: "0408_Final_Project"
+output:
+  pdf_document: default
+  html_document: default
+date: "2025-04-08"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+##############################
+# Step 1: Data Pre-processing
+##############################
+
+## Library Package
+```{r}
+# install.packages("DescTools")
+# install.packages('mgcv')
+# install.packages("tinytex")
+# tinytex::install_tinytex(force = TRUE)
+
+library(readr)                                                                  # Read the csv file
+library(ggplot2)                                                                # Pie chart, box plot, scatter plot
+library(dplyr)                                                                  # data process
+library(car)                                                                    # Levene's test, influence plot
+library(DescTools)                                                              # The Spearmam's correlation
+library(lmtest)                                                                 # bptest
+library(MASS)                                                                   # Robust regression model
+library(mgcv)                                                                   # GAM
+```
+
+## Import Original Data
+```{r}
+file_path = "/Users/minglunlee/Desktop/NEU_2025_Spring/PHTH5210 Biostatistics in Public Health/Final Project/Sleep_Efficiency.csv"
+sleep_efficiency_data <- read_csv(file_path)                                                        # load the file
+head(sleep_efficiency_data)                                                                         # View the file
+```
+## Build a data frame
+```{r}
+sleep_efficiency_new <- sleep_efficiency_data[, c("ID", "Age", "Gender", "REM sleep percentage", 
+                                               "Caffeine consumption", "Alcohol consumption", 
+                                               "Smoking status", "Exercise frequency")]             # Choose the data we need for the RQ and build a new data frame
+colnames(sleep_efficiency_new) <- make.names(colnames(sleep_efficiency_new))                        # Remove the space in the column name
+head(sleep_efficiency_new)                                                                          # Check the first few rows of data set
+attach(sleep_efficiency_new)                                                                        # Attach the data frame
+# View(sleep_efficiency_new)
+```
+## Duplicate data
+```{r}
+if (any(duplicated(sleep_efficiency_new))) {
+  cat("There are duplicated rows:",sleep_efficiency_new[duplicated(sleep_efficiency_new), ])
+} else {print("No duplicated rows found.")}                                                        # No duplicated rows found
+```
+## Missing value
+```{r}
+missing_by_column <- colSums(is.na(sleep_efficiency_new))                                           # Check the N/A value by columns
+print(missing_by_column)                                                                            # Caffeine: 25 rows, Alcohol: 14 rows, Exercise: 6 rows
+```
+# Check the outliers
+```{r}
+# Caffeine.consumption - Outliers
+caffeine_Q1 <- quantile(Caffeine.consumption,0.25,na.rm = TRUE)                 # Set the Q1 for the column caffeine
+caffeine_Q3 <- quantile(Caffeine.consumption,0.75,na.rm = TRUE)                 # Set the Q3 for the column caffeine
+caffeine_IQR <- caffeine_Q3 - caffeine_Q1                                       # Set the IQR
+caffeine_lower_bound <- caffeine_Q1 - 1.5 * caffeine_IQR                        # Set the upper bound of the caffeine
+caffeine_upper_bound <- caffeine_Q3 + 1.5 * caffeine_IQR                        # Set the lower bound of the caffeine
+
+caffeine_outliers <- sleep_efficiency_new |>
+  filter(!is.na(Caffeine.consumption)) |>
+  filter(Caffeine.consumption < caffeine_lower_bound | 
+    Caffeine.consumption > caffeine_upper_bound)                                # Filter the data exceed the outliers bound
+caffeine_ids <- caffeine_outliers$ID                                            # Mark as possible influential points
+print(caffeine_outliers[ ,c("ID","Caffeine.consumption")])                      # Outliers*4
+```
+
+```{r}
+# Alcohol.consumption - Outliers
+alcohol_Q1 <- quantile(Alcohol.consumption,0.25,na.rm = TRUE)                   # Set the Q1 for the column alcohol
+alcohol_Q3 <- quantile(Alcohol.consumption,0.75,na.rm = TRUE)                   # Set the Q3 for the column alcohol
+alcohol_IQR <- alcohol_Q3 - alcohol_Q1                                          # Set the IQR
+alcohol_lower_bound <- alcohol_Q1 - 1.5 * alcohol_IQR                           # Set the upper bound of the alcohol
+alcohol_upper_bound <- alcohol_Q3 + 1.5 * alcohol_IQR                           # Set the upper bound of the alcohol
+
+alcohol_outliers <- sleep_efficiency_new |>
+  filter(!is.na(Alcohol.consumption)) |>
+  filter(Alcohol.consumption < alcohol_lower_bound | 
+    Alcohol.consumption > alcohol_upper_bound)                                  # Filter the data exceed the outliers bound
+print(alcohol_outliers)                                                         # No outliers
+```
+
+```{r}
+#  Exercise.Frequency - Outliers
+exercise_freq_Q1 <- quantile(Exercise.frequency,0.25,na.rm = TRUE)              # Set the Q1 for the column exercise frequency
+exercise_freq_Q3 <- quantile(Exercise.frequency,0.75,na.rm = TRUE)              # Set the Q3 for the column exercise frequency
+exercise_freq_IQR <- exercise_freq_Q3 - exercise_freq_Q1                        # Set the IQR
+exercise_freq_lower_bound <- exercise_freq_Q1 - 1.5 * exercise_freq_IQR         # Set the upper bound of the exercise frequency
+exercise_freq_upper_bound <- exercise_freq_Q3 + 1.5 * exercise_freq_IQR         # Set the lower bound of the exercise frequency
+
+exercise_freq_outliers <- sleep_efficiency_new |>
+  filter(!is.na(Exercise.frequency)) |>
+  filter(Exercise.frequency < exercise_freq_lower_bound | 
+    Exercise.frequency > exercise_freq_upper_bound)                             # Filter the data exceed the outliers bound
+print(exercise_freq_outliers)                                                   # No outliers
+```
+# Check Normality
+```{r}
+#  Caffeine + Alcohol + Exercise - Normality
+caffeine_clean <- na.omit(Caffeine.consumption)                                 # Remove the N/A value in the column caffeine consumption
+alcohol_clean <- na.omit(Alcohol.consumption)                                   # Remove the N/A value in the column alcohol consumption
+exercise_freq_clean <- na.omit(Exercise.frequency)                              # Remove the N/A value in the column exercise frequency
+
+var <- list(Caffeine = caffeine_clean, Alcohol = alcohol_clean, Exercise.Freq = exercise_freq_clean)
+for (var_name in names(var)) {
+  p <- shapiro.test(var[[var_name]])$p.value
+  if (p < 0.05) {
+    cat(var_name, "is NOT normally distributed (p =", round(p, 4), ")\n")
+  } else {
+    cat(var_name, "is normally distributed (p =", round(p, 4), ")\n")
+  }
+}                                                                               # Caffeine, Alcohol, Exercise distributed is NOT normally distributed  
+```
+# Insert median to the missing value (Outliers + Not normal distribution)
+```{r}
+sleep_efficiency_new$ Caffeine.consumption[is.na(Caffeine.consumption)] <- median(Caffeine.consumption, na.rm = TRUE)  # Insert the median to the missing value (caffeine)
+sleep_efficiency_new$ Alcohol.consumption[is.na(Alcohol.consumption)] <- median(Alcohol.consumption, na.rm = TRUE)     # Insert the median to the missing value (alcohol)
+sleep_efficiency_new$ Exercise.frequency[is.na(Exercise.frequency)] <- median(Exercise.frequency, na.rm = TRUE)        # Insert the median to the missing value (Exercise freq)
+head(sleep_efficiency_new) 
+```
+# Set the categorical as factor
+```{r}
+sleep_efficiency_new$Gender <- as.factor(sleep_efficiency_new$Gender)                 
+sleep_efficiency_new$Smoking.status <- as.factor(sleep_efficiency_new$Smoking.status)               
+sleep_efficiency_new$Exercise.factor <- as.factor(sleep_efficiency_new$Exercise.frequency)          # Change the categorical into factor
+```
+
+##############################
+# Step 2: Descriptive Stats
+##############################
+
+# ---------------------------------------------1. IV: Age (continuous)-------------------------------------------------------#
+```{r}
+# Age Histogram
+age_dataframe <- as.data.frame(Age)
+ggplot(age_dataframe, aes(x = Age)) +                                           # Build the x-axis
+  geom_histogram(binwidth = 5, fill = "lightblue", color = "black") +           # Adjust the color and the bin width
+  labs(title = "Histogram of Age Distribution", x = "Age", y = "Frequency") +   # Add the label
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))                                 # Put the label in the middle
+```
+
+```{r}
+# Age Normality
+Age_shapiro <- shapiro.test(Age)
+cat("Age Shapiro-Wilk Test p-value:", round(Age_shapiro$p.value,3),"\n")
+if (Age_shapiro$p.value < 0.05){print("Samples DID NOT come from normal distributions")
+}else {print("Samples came from normal distributions")}                         # Shapiro-Wilk Test p-value: 0 -> NOT normal distributions
+```
+```{r Age Outliers}
+age_Q1 <- quantile(Age,0.25,na.rm = TRUE)
+age_Q3 <- quantile(Age,0.75,na.rm = TRUE)
+age_IQR <- age_Q3 - age_Q1
+age_lower_bound <- age_Q1 - 1.5 * age_IQR
+age_upper_bound <- age_Q3 + 1.5 * age_IQR
+
+age_outliers <- sleep_efficiency_new |>
+  filter(Age < age_lower_bound | Age > age_upper_bound)
+print(age_outliers)                                                             # No Outliers
+```
+
+```{r}
+#  Age Descriptive Statistics
+age_summary <- summary(Age)
+cat("Age Descriptive Summary:","\nQ1:",age_summary["1st Qu."], 
+    "\nMedian:", age_summary["Median"], "\nQ3:", age_summary["3rd Qu."],
+    "\nIQR:",age_summary["3rd Qu."]-age_summary["1st Qu."])                     # Not normal distribution + No outliers -> Median + IQR
+```
+
+```{r, fig.width=3, fig.height=6}   
+# Age Box Plot
+ggplot(age_dataframe, aes(y = Age)) +                                           # Draw a box plot
+  geom_boxplot(fill = "lightyellow") +                                          # Fill the  box color
+  labs(title = "Box Plot of Age",                                         
+       y = "Age") +                                                             # Add the label
+  theme_minimal() +                                                             # Clear background
+  theme(plot.title = element_text(hjust = 0.5))                                 # Put the label in the middle
+```
+
+# --------------------------------------------2. IV: Gender (categorical)----------------------------------------------------#
+```{r}
+# Descriptive statistics
+gender_table <- table(Gender)                                                   # Calculate the numbers of female and male 
+gender_prop_table <- prop.table(gender_table)*100                               # Calculate the percentage of female and male
+print(gender_prop_table)
+
+# Pie chart
+gender_table_dataframe <- as.data.frame(gender_table)                           # Change the table into data frame
+gender_table_dataframe$percent <- round(gender_table_dataframe$Freq / sum(gender_table_dataframe$Freq) * 100, 1)  # Add the percentage column
+gender_table_dataframe$label <- paste0(gender_table_dataframe$Gender, ": ", gender_table_dataframe$percent, "%")  # Add the label column
+
+ggplot(gender_table_dataframe, aes(x="",y = Freq, fill = Gender)) +             # Draw the pie chart
+  geom_bar(width = 1, stat = "identity") +                                      # Draw the bar chart first
+  coord_polar("y", start = 0) +                                                 # Change the y-axis -> polar coordinates
+  labs(title = "Gender") +                                                      # Add the graph title
+  geom_text(aes(label=label), position=position_stack(vjust=0.5), color="white", size=5)  +     # Add the label
+  theme_void()  +                                                               # Remove the axis & background
+  theme(legend.position = "none",                                               # Remove the legend
+         plot.title = element_text(hjust = 0.5))                                # Put the title in the middle
+```
+# --------------------------------------3. DV: REM sleep percentage (continuous)---------------------------------------------#
+```{r}
+# REM Histogram
+REM_sleep_percentage_dataframe <- as.data.frame(REM.sleep.percentage)
+ggplot(REM_sleep_percentage_dataframe, aes(x = REM.sleep.percentage)) +                          # Build the x-axis
+  geom_histogram(binwidth = 1, fill = "lightblue", color = "black") +                            # Adjust the color and the bin width
+  labs(title = "Histogram of REM Sleep Percentage Distribution", x = "Age", y = "Frequency") +   # Add the label
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))                                                  # Put the label in the middle
+hist(log(REM.sleep.percentage))
+```
+
+```{r}
+# REM Normality
+REM_shapiro <- shapiro.test(REM.sleep.percentage)                               # Shapiro-Wilk Test
+cat("REM(%) Shapiro-Wilk Test p-value:", round(REM_shapiro$p.value,3),"\n")     # Print the p-value
+if (REM_shapiro$p.value < 0.05){cat("Samples DID NOT come from normal distributions")
+}else {cat("Samples came from normal distributions")}                           # Shapiro-Wilk Test p-value: 0 --> NOT normal distributions
+```
+
+```{r}
+#  REM Outliers
+REM_Q1 <- quantile(REM.sleep.percentage,0.25,na.rm = TRUE)                      # Set Q1                  
+REM_Q3 <- quantile(REM.sleep.percentage,0.75,na.rm = TRUE)                      # Set Q3
+REM_IQR <- REM_Q3 - REM_Q1                                                      # Calculate IQR
+REM_lower_bound <- REM_Q1 - 1.5 * REM_IQR                                       # Set lower bound
+REM_upper_bound <- REM_Q3 + 1.5 * REM_IQR                                       # Set upper bound
+
+REM_outliers <- sleep_efficiency_new|>
+  filter(REM.sleep.percentage < REM_lower_bound | REM.sleep.percentage > REM_upper_bound)
+print(REM_outliers)                                                             # No Outliers
+```
+
+```{r} 
+# REM Descriptive Statistics
+REM_summary <- summary(REM.sleep.percentage)                                    # Summary the REM sleep percentage
+cat("REM sleep percentage descriptive statistics","\nQ1:",REM_summary["1st Qu."], 
+    "\nMedian:", REM_summary["Median"], "\nQ3:", REM_summary["3rd Qu."],
+    "\nIQR:",REM_summary["3rd Qu."]- REM_summary["1st Qu."])                    # Not normal distribution + No outliers -> Median + IQR
+```
+
+```{r, fig.width=3, fig.height=6}
+#  REM Box Plot
+ggplot(REM_sleep_percentage_dataframe, aes(y = REM.sleep.percentage)) +        # Draw a box plot 
+  geom_boxplot(fill = "lightyellow") +                                          # Fill box color
+  labs(title = "Box Plot of REM sleep percentage",  
+       y = "REM sleep percentage") +                                            # Add the box label
+  theme_minimal() +                                                             # Clear the background
+  theme(plot.title = element_text(hjust = 0.5))                                 # Put the label in the middle
+```
+# ------------------------------------4. IV: Caffeine consumption (categorical)----------------------------------------------#
+```{r}
+# Caffeine Histogram
+caffeine_consumption_dataframe <- as.data.frame(sleep_efficiency_new$Caffeine.consumption)                  # Transform to data frame
+ggplot(caffeine_consumption_dataframe, aes(x = sleep_efficiency_new$Caffeine.consumption)) +                # Build the x-axis
+  geom_histogram(binwidth = 20, fill = "lightblue", color = "black") +                                      # Adjust the color and the bin width
+  labs(title = "Histogram of Caffeine Consumption Distribution", x = "Caffeine consumption", y = "Frequency") +   # Add the label
+  theme_minimal() +                                                                                         # Clean theme
+  theme(plot.title = element_text(hjust = 0.5))                                                             # Put the label in the middle
+hist(log(Caffeine.consumption))
+```
+```{r}
+#  Caffeine Normality
+caffeine_shapiro <- shapiro.test(Caffeine.consumption)
+cat("REM(%) Shapiro-Wilk Test p-value:", round(REM_shapiro$p.value,3), "\n")
+if (REM_shapiro$p.value < 0.05){cat("Samples DID NOT come from normal distributions")
+}else {cat("Samples came from normal distributions")}                                                        # Shapiro-Wilk Test p-value: 0 --> NOT normal distributions
+```
+
+```{r}
+#  Caffeine Descriptive Summary
+caffeine_summary <- summary(Caffeine.consumption)                               # Summary the REM sleep percentage
+cat("Caffeine consumption descriptive:","\nQ1:",caffeine_summary["1st Qu."], 
+    "\nMedian:", caffeine_summary["Median"], "\nQ3:", caffeine_summary["3rd Qu."],
+    "\nIQR:",caffeine_summary["3rd Qu."]- caffeine_summary["1st Qu."])          # Not normal distribution + No outliers -> Median + IQR
+```
+
+```{r, fig.width=3, fig.height=6}
+#  Caffeine Box Plot,
+ggplot(caffeine_consumption_dataframe, aes(y = sleep_efficiency_new$Caffeine.consumption)) +   
+  geom_boxplot(fill = "lightyellow") +                                          # Fill the box color
+  labs(title = "Box Plot of Caffeine Consumption",
+       y = "Caffeine Consumption") +                                            # Add labels
+  theme_minimal() +                                                             # Clear theme
+  theme(plot.title = element_text(hjust = 0.5))                                 # Put the label in the middle
+```
+
+# ------------------------------------5. IV: Alcohol consumption (categorical)----------------------------------------------#
+```{r}
+#  Alcohol Histogram
+alcohol_consumption_dataframe <- as.data.frame(sleep_efficiency_new$Alcohol.consumption)                        # Change the table into data frame
+ggplot(alcohol_consumption_dataframe, aes(x = sleep_efficiency_new$Alcohol.consumption)) +                      # Build the x-axis
+  geom_histogram(binwidth = 1, fill = "lightblue", color = "black") +                                           # Adjust the color + bin width
+  labs(title = "Histogram of Alcohol Consumption Distribution", x = "Alcohol consumption", y = "Frequency") +   # Add the label
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))                                                                 # Put the label in the middle
+hist(Alcohol.consumption)
+```
+
+```{r}
+#  Alcohol Normality
+alcohol_shapiro <- shapiro.test(Alcohol.consumption)
+cat("Alcohol Consumption Shapiro-Wilk Test (Normality):", round(alcohol_shapiro$p.value,3))
+if (alcohol_shapiro$p.value < 0.05){
+  cat("\nSamples DID NOT come from normal distributions")
+}else {cat("\nSamples came from normal distributions")}                         # Samples DID NOT come from normal distributions
+```
+
+```{r}
+#  Alcohol Descriptive Statistics
+alcohol_summary <- summary(sleep_efficiency_new$Alcohol.consumption)            # Summary the REM sleep percentage
+cat("Alcohol consumption descriptive:","\nQ1:",alcohol_summary["1st Qu."], 
+    "\nMedian:", alcohol_summary["Median"], "\nQ3:", alcohol_summary["3rd Qu."],
+    "\nIQR:",alcohol_summary["3rd Qu."]- alcohol_summary["1st Qu."])            # Not normal distribution + No outliers -> Median + IQR
+```
+
+```{r, fig.width=3, fig.height=6}
+# , Alcohol Box Plot
+ggplot(alcohol_consumption_dataframe, aes(y = sleep_efficiency_new$Alcohol.consumption)) +
+  geom_boxplot(fill = "lightyellow") +
+  labs(title = "Box Plot of Alcohol Consumption",
+       y = "Alcohol Consumption") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))                                 # Put the label in the middle
+```
+
+# ----------------------------------------6. IV: Smoke status (Categorical)--------------------------------------------------#
+```{r}
+#  Smoke status
+smoking_table <- table(Smoking.status)                                          # Calculate the numbers of smoke and non-smoke 
+print(smoking_table)
+smoking_prop_table <- prop.table(smoking_table)*100                             # Calculate the percentage of female and male
+print(smoking_prop_table)
+# Pie chart
+smoking_table_dataframe <- as.data.frame(smoking_table)                         # Change the table into data frame
+smoking_table_dataframe$percent <- round(smoking_table_dataframe$Freq / sum(smoking_table_dataframe$Freq) * 100, 1)          # Add the percent col
+smoking_table_dataframe$label <- paste0(smoking_table_dataframe$Smoking.status, ": ", smoking_table_dataframe$percent, "%")  # Add the label column
+
+ggplot(smoking_table_dataframe, aes(x="",y = Freq, fill = Smoking.status)) +    # Draw the pie chart
+  geom_bar(width = 1, stat = "identity") +                                      # Draw the bar chart first
+  coord_polar("y", start = 0) +                                                 # change the y-axis -> polar coordinates
+  labs(title = "Smoking status") +                                              # Add the graph title
+  geom_text(aes(label=label), position=position_stack(vjust=0.5), 
+            color="white", size=5)  +                                           # Add the label
+  theme_void()  +                                                               # Remove the axis & background
+  theme(legend.position = "none",                                               # Remove the legend
+         plot.title = element_text(hjust = 0.5))                                # Put the title in the middle
+```
+
+
+# ------------------------------------7. IV: Exercise frequency (Continuous)----------------------------------------------#
+```{r}
+# Descriptive statistics
+exercise_table <- table(sleep_efficiency_new$Exercise.factor)                                                   # Calculate the numbers of female and male 
+exercise_prop_table <- prop.table(exercise_table)*100                                      # Calculate the percentage of female and male
+print(exercise_prop_table)
+
+# Pie chart
+exercise_table_dataframe <- as.data.frame(exercise_table)                           # Change the table into data frame
+exercise_table_dataframe$percent <- round(exercise_table_dataframe$Freq / sum(exercise_table_dataframe$Freq) * 100, 1)  # Add the percentage column
+exercise_table_dataframe$label <- paste0(exercise_table_dataframe$Gender, ": ", exercise_table_dataframe$percent, "%")  # Add the label column
+
+ggplot(exercise_table_dataframe, aes(x="",y = Freq, fill = Var1)) +             # Draw the pie chart
+  geom_bar(width = 1, stat = "identity") +                                      # Draw the bar chart first
+  coord_polar("y", start = 0) +                                                 # Change the y-axis -> polar coordinates
+  labs(title = "Exercise") +                                                      # Add the graph title
+  geom_text(aes(label=label), position=position_stack(vjust=0.5), color="white", size=5)  +     # Add the label
+  theme_void()  +                                                               # Remove the axis & background
+  theme(legend.position = "none",                                               # Remove the legend
+         plot.title = element_text(hjust = 0.5))                                # Put the title in the middle
+```
+
+################################
+# Step 3: Univariate association
+################################
+# Dependent Variable: REM sleep percentage
+# Independent Variable: 
+# (1) Caffeine consumption (2) ALcohol consumption 
+# (3) Smoking status (4) Exercise frequency
+# (5) Gender (6) Age
+
+# --------------------------------------------IV: Gender (categorical)----------------------------------------------------#
+```{r}
+# REM sleep(NOT normal distribution) --> Mann-Witney
+gender_REM_mann_witney <- wilcox.test(REM.sleep.percentage ~ Gender, 
+                                      data = sleep_efficiency_new, conf.int=TRUE)    
+cat("Gender & REM Sleep Percentage Mann-Witney Test:", "\np-value:", 
+    round(gender_REM_mann_witney$p.value,4))                                    # p-value = 7e-04
+if (gender_REM_mann_witney$p.value < 0.05){
+  cat("\nGender has a significant effect on REM sleep percentage")              # Gender has a significant effect on REM sleep percentage
+} else {cat("\nGender does NOT have a significant effect on REM sleep percentage")}
+cat("\nConfident interval:",gender_REM_mann_witney$conf.int)                    # 95% CI
+```
+```{r, fig.width=6, fig.height=6}
+#  Gender Box Plot
+boxplot(REM.sleep.percentage ~ Gender, data = sleep_efficiency_new)
+```
+# ----------------------------------------IV: Smoke status (Categorical)--------------------------------------------------#
+```{r}
+#  Smoke - Check Equal Variance
+smoke_levene <- leveneTest(REM.sleep.percentage ~ Smoking.status, data = sleep_efficiency_new)       
+smoke_levene_p <- smoke_levene[1, "Pr(>F)"]                                     # Smoke levene test p-value
+cat("Smoke Levene's test p-value:", round(smoke_levene_p,3), "\n")
+if (smoke_levene_p > 0.05){
+  cat("Fail to reject H0. Smoke has equal variance")
+} else{cat("Fail to reject H0. Smoke DOES NOT have equal variance")}            # P-value = 0.773, Fail to reject H0 --> Equal Variance
+```
+```{r}
+# Smoking status (Equal Variance), REM sleep percentage(NOT normal distribution) --> Mann-Witney
+smoke_REM_mann_witney <- wilcox.test(REM.sleep.percentage ~ Smoking.status, 
+                                      data = sleep_efficiency_new, conf.int=TRUE)    
+cat("Smoke & REM Sleep Percentage Mann-Witney Test:", "\np-value:", 
+    round(smoke_REM_mann_witney$p.value,3))                                     # p-value = 0.484
+if (smoke_REM_mann_witney$p.value < 0.05){
+  cat("\nSmoke has a significant effect on REM sleep percentage")               # Smoke does NOT have a significant effect on REM sleep percentage
+} else {cat("\nSmoke does NOT have a significant effect on REM sleep percentage")}
+cat("\nConfident interval:",smoke_REM_mann_witney$conf.int)                     # 95% CI
+```
+```{r, fig.width=6, fig.height=6}
+# Smoke Box Plot
+boxplot(REM.sleep.percentage ~ Smoking.status, data = sleep_efficiency_new)
+```
+
+# ---------------------------------------------IV: Age (continuous)-------------------------------------------------------#
+```{r}
+# Age + REM sleep percentage (NOT normal distribution) --> Spearman's correlation
+table(Age)[table(Age) > 1]                                                      # ties
+age_REM_spearman <- cor.test(sleep_efficiency_new$Age, 
+                             sleep_efficiency_new$REM.sleep.percentage, 
+                             method = "spearman", 
+                             exact = FALSE)
+age_REM_spearman_ci <- SpearmanRho(sleep_efficiency_new$Age, 
+                                   sleep_efficiency_new$REM.sleep.percentage, 
+                                   conf.level = 0.95)                           # 95% CI
+cat("Age & REM Sleep Percentage Spearman's correlation:",
+    "\np-value:", round(age_REM_spearman$p.value,3),                            # p-value = 0.67 --> not statistical significant
+    "\nrho:", round(age_REM_spearman$estimate,3),                               # rho = 0.0201. --> Low impact
+    "\n95% CI:", round(age_REM_spearman_ci[2],3), round(age_REM_spearman_ci[3],3))   # 95% CI: [-0.072, 0.112]          
+```
+```{r}
+# Scatter Plot
+ggplot(data = sleep_efficiency_new, aes(x = Age, y= REM.sleep.percentage)) +
+  geom_point () +
+  geom_smooth(method = "lm") + # linear regression line 
+  theme_minimal() +
+  labs(title = "Age & REM Sleep Percentage Scatter Plot")
+```
+# ------------------------------------IV: Exercise frequency (continuous)----------------------------------------------#
+```{r}
+# Exercise(multiple group) + REM sleep(NOT normal distribution) --> Kruskal test
+exercise_REM_kruskal <- kruskal.test(REM.sleep.percentage ~ Exercise.factor, data = sleep_efficiency_new)
+print(exercise_REM_kruskal)
+cat("Exercise & REM Sleep Percentage Kruskal Test:", "\np-value:", 
+    round(exercise_REM_kruskal$p.value,3))                                     # p-value = 0
+if (exercise_REM_kruskal$p.value < 0.05){
+  cat("\nExercise has a significant effect on REM sleep percentage")               # Smoke does NOT have a significant effect on REM sleep percentage
+} else {cat("\nExercise does NOT have a significant effect on REM sleep percentage")}
+
+anova_result <- aov(REM.sleep.percentage ~ Exercise.factor, data = sleep_efficiency_new)
+tukey_result <- TukeyHSD(anova_result)
+print(tukey_result)
+```
+```{r, fig.width=6, fig.height=6}
+# Smoke Box Plot
+boxplot(REM.sleep.percentage ~ Exercise.factor, data = sleep_efficiency_new)
+```
+
+
+# ------------------------------------IV: Alcohol consumption (continuous)----------------------------------------------#
+```{r}
+# Alcohol + REM sleep percentage is NOT normal distribution --> Spearman's correlation
+table(Alcohol.consumption)[table(Alcohol.consumption) > 1]                      # ties
+alcohol_REM_spearman <- cor.test(sleep_efficiency_new$Alcohol.consumption, 
+                             sleep_efficiency_new$REM.sleep.percentage, 
+                             method = "spearman", exact = FALSE)
+
+alcohol_REM_spearman_ci <- SpearmanRho(sleep_efficiency_new$Alcohol.consumption, 
+                                   sleep_efficiency_new$REM.sleep.percentage, 
+                                   conf.level = 0.95)                           # 95% CI
+cat("Alcohol & REM Sleep Percentage Spearman's correlation:",
+    "\np-value:", round(alcohol_REM_spearman$p.value,3),                        # p-value = 0.456 --> not statistical significant
+    "\nrho:", round(alcohol_REM_spearman$estimate,3),                           # rho = -0.35 -->  low correlation, very weak negative correlation 
+    "\n95% CI:", round(alcohol_REM_spearman_ci[2],3), round(alcohol_REM_spearman_ci[3],3))   # 95% CI: [-0.062, 0.122]  
+```
+
+```{r}
+# Scatter Plot
+ggplot(data = sleep_efficiency_new, aes(x=Alcohol.consumption,y= REM.sleep.percentage)) +
+  geom_point () +
+  geom_smooth(method = "lm") + # linear regression line 
+  theme_minimal() +
+  labs(title = "Alcohol & REM Sleep Percentage Scatter Plot")
+```
+# ------------------------------------IV: Caffeine consumption (continuous)----------------------------------------------#
+```{r}
+# Caffeine + REM sleep percentage (NOT normal distribution) --> Spearman's correlation
+table(Caffeine.consumption)[table(Caffeine.consumption) > 1]                      # ties
+caffeine_REM_spearman <- cor.test(sleep_efficiency_new$Caffeine.consumption, 
+                             sleep_efficiency_new$REM.sleep.percentage, 
+                             method = "spearman", exact = FALSE)
+
+caffeine_REM_spearman_ci <- SpearmanRho(sleep_efficiency_new$Caffeine.consumption, 
+                                   sleep_efficiency_new$REM.sleep.percentage, 
+                                   conf.level = 0.95)                           # 95% CI
+cat("Caffeine consumption & REM Sleep Percentage Spearman's correlation:",
+    "\np-value:", round(caffeine_REM_spearman$p.value,3),                       # p-value = 0.039 --> not statistical significant
+    "\nrho:", round(caffeine_REM_spearman$estimate,3),                          # rho = 0.0969 -->  low correlation, weak positive correlation 
+    "\n95% CI:", round(caffeine_REM_spearman_ci[2],3), round(caffeine_REM_spearman_ci[3],3))   # 95% CI: [0.05, 0.187]  
+```
+```{r}
+# Scatter Plot
+ggplot(data = sleep_efficiency_new, aes(x= Caffeine.consumption,y= REM.sleep.percentage)) +
+  geom_point () +
+  geom_smooth(method = "lm") + # linear regression line 
+  theme_minimal() +
+  labs(title = "Caffeine & REM Sleep Percentage Scatter Plot")
+```
+######################################
+# Step 4: Univariate Linear Regression
+######################################
+```{r}
+# Age_REM_lm
+age_REM_lm <-lm(REM.sleep.percentage ~ Age, data = sleep_efficiency_new)
+summary(age_REM_lm)
+confint(age_REM_lm)
+```
+```{r}
+# Gender_REM_lm
+gender_REM_lm <-lm(REM.sleep.percentage ~ Gender, data = sleep_efficiency_new)
+summary(gender_REM_lm)
+confint(gender_REM_lm)
+```
+```{r}
+# Exercise_Freq_REM_lm
+exercise_REM_lm <-lm(REM.sleep.percentage ~ Exercise.factor, data = sleep_efficiency_new)
+summary(exercise_REM_lm)
+confint(exercise_REM_lm)
+```
+```{r}
+# Smoke_REM_lm
+smoke_REM_lm <-lm(REM.sleep.percentage ~ Smoking.status, data = sleep_efficiency_new)
+summary(smoke_REM_lm)
+confint(smoke_REM_lm)
+```
+```{r}
+# Alcohol_REM_lm
+alcohol_REM_lm <-lm(REM.sleep.percentage ~ Alcohol.consumption, data = sleep_efficiency_new)
+summary(alcohol_REM_lm)
+confint(alcohol_REM_lm)
+```
+```{r}
+# Caffeine_REM_lm
+caffeine_REM_lm <-lm(REM.sleep.percentage ~ Caffeine.consumption, data = sleep_efficiency_new)
+summary(caffeine_REM_lm)
+confint(caffeine_REM_lm)
+```
+######################################
+# Step 5: Multiple Linear Regression
+######################################
+```{r}
+#  Build a multiple linear regression model
+M1 <- lm(REM.sleep.percentage ~ Age + Gender + Exercise.factor + Smoking.status + Alcohol.consumption + Caffeine.consumption, 
+         data = sleep_efficiency_new)
+summary(M1)
+confint(M1)
+```
+
+######################################
+# Step 6: Check LM Model Assumption
+######################################
+## OLS
+# 1. Residuals Linearity - Residual scatter plot
+# 2. Residuals Normality - plot/ Hist/ QQ/ Shapiro
+# 3. Independence of Errors (Autocorrelation) - Durbin-Watson Test
+# 4. Residuals Homoscedasiticity (Equal Variance) - Breusch-Pagan
+# 5. Mean of Residuals is 0
+# 6. Multicollinearity - VIF
+
+#-----------------MODEL 1---------------------#
+```{r}
+# Linearity
+plot(M1, which = 1)                                                             # Residuals vs. Fitted
+```
+```{r}
+# Normality
+plot(M1, which = 2)                                                             # QQ plot   
+shapiro.test(residuals(M1))                                                     # Shapiro-Wilk Test --> VIOLATE
+```
+```{r}
+# Homoscedasiticity
+plot(M1, which = 3)                                                             # Scale-Location Plot
+bptest(M1)                                                                      # Breusch-Pagan --> VIOLATE
+```
+```{r} 
+# Residuals Mean
+mean(residuals(M1))
+```
+```{r}
+# Independence of Errors
+dwtest(M1)                                                                      # Durbin-Watson Test
+```
+```{r}
+# Multicollinearity
+vif(M1)                                                                         # VIF
+```
+# Check Influential Points
+```{r}
+# Leverage: X values
+leverage_values <- lm.influence(M1)$hat                                         # Calculate the leverage values
+leverage_threshold <- 2 *(6/nrow(sleep_efficiency_new))                         # Set the leverage threshold
+plot(REM.sleep.percentage,leverage_values)
+abline(h = leverage_threshold, col = "red")
+high_leverage_points <- which(leverage_values > leverage_threshold)             # List the high leverage points
+text(REM.sleep.percentage[high_leverage_points],
+     leverage_values[high_leverage_points],
+     labels = high_leverage_points, pos = 4, col = "blue")                      # Add labels
+cat("High Leverage Points:",high_leverage_points)
+```
+```{r}
+# studentized residuals: Y values
+studentized_residuals <- rstudent(M1)
+high_residual_points <- which(abs(studentized_residuals) > 2)
+cat("High Residual Points",high_residual_points)
+```
+```{r}
+# Cook Distance: overall
+cooks_d <- cooks.distance(M1)
+plot(M1, which=4) 
+M1_cd_threshold <- 4/nrow(sleep_efficiency_new)
+abline(h = M1_cd_threshold, col = "red")
+high_cd_points <- which(cooks_d > M1_cd_threshold)
+text(x = high_cd_points, y = cooks_d[high_cd_points], labels = high_cd_points,
+     pos = 3, cex = 0.8, col = "blue")
+cat("High Cook Distance Points", high_cd_points)
+```
+```{r}
+# influential point
+high_influential_points <- influencePlot(M1)
+print(high_influential_points)
+```
+```{r}
+# DFBETA
+dfb <- dfbetas(M1)
+dfbeta_threshold <- 2 / sqrt(nrow(sleep_efficiency_new))
+high_dfbeta_rows <- which(apply(abs(dfb), 1, function(x) any(x > dfbeta_threshold)))   # Find the data row greater than thrshold
+dfb_influential_points <- dfb[high_dfbeta_rows, ]                               
+print(dfb_influential_points)
+```
+```{r}
+# Compare the influential points with DFBETA
+influential_ids <- as.numeric(rownames(high_influential_points))                # Change the row name into index
+temp_influential_ids <- union(caffeine_ids, influential_ids)               # Union with caffeine outliers
+common_influential_ids <- intersect(high_dfbeta_rows, temp_influential_ids)     # Intersect with high DFBETA
+common_dfbeta <- dfb[common_influential_ids, ]
+print(common_dfbeta)
+```
+```{r}
+# Remove the influential points
+sleep_efficiency_subset <- sleep_efficiency_new[-c(63,82,97,162,213,258), ]
+head(sleep_efficiency_subset)
+```
+#-----------------MODEL 2: REMOVE INFLUENTIAL POINTS---------------------#
+```{r}
+# M2 - Build a new model
+M2 <-lm(REM.sleep.percentage ~ Age + Gender + Exercise.factor + Smoking.status + Alcohol.consumption + Caffeine.consumption, data = sleep_efficiency_subset)
+summary(M2)
+confint(M2)
+```
+
+```{r}
+# M2_Normality
+plot(M2, which = 2)                                                             # QQ plot   
+shapiro.test(residuals(M2))                                                     # p-value < 0.05 --> violate
+```
+```{r}
+# M2_Homoscedasiticity
+plot(M2, which = 3)                                                             # Scale-Location Plotg  
+bptest(M2)                                                                      # Breusch-Pagan, p-value < 0.05 --> violate
+```
+#-----------------MODEL 3: LOG TRANSFORMATION---------------------#
+```{r}
+M3 <- lm(log(REM.sleep.percentage) ~ Age + Gender + Exercise.factor + Smoking.status + Alcohol.consumption + Caffeine.consumption, data = sleep_efficiency_subset)
+summary(M3)
+confint(M3)
+```
+```{r}
+# M3_Normality
+plot(M3, which = 2)                                                             # QQ plot   
+shapiro.test(residuals(M3))                                                     # p-value < 0.05 --> violate
+```
+```{r}
+# M3_Homoscedasiticity
+plot(M3, which = 3)                                                             # Scale-Location Plotg  
+bptest(M3)                                                                      # Breusch-Pagan, p-value < 0.05 --> violate
+```
+#-----------------MODEL 4: ROBUST REGRESSION---------------------#
+```{r}
+M4 <- rlm(log(REM.sleep.percentage) ~ Age + Gender + Exercise.factor + Smoking.status + Alcohol.consumption +  Caffeine.consumption,
+                data = sleep_efficiency_subset)
+summary(M4)
+```
+```{r}
+# M4_Normality
+plot(M4, which = 2)                                                             # QQ plot   
+shapiro.test(residuals(M4))                                                     # p-value < 0.05 --> violate
+```
+```{r}
+# M4_Homoscedasiticity
+plot(M4, which = 3)                                                             # Scale-Location Plotg  
+bptest(M4)                                                                      # Breusch-Pagan, p-value < 0.05 --> violate
+```
+#-----------------MODEL 5: GLM---------------------#
+```{r}
+M5 <- glm(log(REM.sleep.percentage) ~ Age + Gender + Exercise.factor + Smoking.status + Alcohol.consumption + Caffeine.consumption, 
+             family = gaussian(link = "log"), data = sleep_efficiency_subset)
+summary(M5)
+```
+```{r}
+# M5_Normality
+plot(M5, which = 2)                                                             # QQ plot   
+shapiro.test(residuals(M5))                                                     # p-value < 0.05 --> violate
+```
+```{r}
+# M5_Homoscedasiticity
+plot(M5, which = 3)                                                             # Scale-Location Plotg  
+bptest(M5)                                                                      # Breusch-Pagan, p-value < 0.05 --> violate
+```
+#-----------------MODEL 6: sqr(y)---------------------#
+```{r}
+M6 <- lm(sqrt(REM.sleep.percentage) ~ Age + Gender + Exercise.factor + Smoking.status + Alcohol.consumption + Caffeine.consumption, 
+             data = sleep_efficiency_subset)
+summary(M6)
+```
+```{r}
+# M6_Normality
+plot(M6, which = 2)              # QQ plot   
+shapiro.test(residuals(M6))      # p-value < 0.05 --> violate
+```
+```{r}
+#  M6_Homoscedasiticity
+plot(M6, which = 3)              # Scale-Location Plotg  
+bptest(M6)                       # Breusch-Pagan, p-value < 0.05 --> violate
+```
+#-----------------MODEL 7: WLS---------------------#
+```{r}
+model_ols <- lm(REM.sleep.percentage ~ Age + Gender + Exercise.frequency +
+                  Smoking.status + Alcohol.consumption + Caffeine.consumption,
+                data = sleep_efficiency_subset)
+resid <- residuals(model_ols)
+fitted <- fitted(model_ols)
+plot(fitted, resid)
+abline(h = 0, col = "red")
+
+var_model <- lm(abs(resid) ~ fitted)
+pred_var <- predict(var_model)
+
+weights <- 1 / (pred_var^2)
+
+M7 <- lm(REM.sleep.percentage ~ Age + Gender + Exercise.factor +
+                  Smoking.status + Alcohol.consumption + Caffeine.consumption,
+                data = sleep_efficiency_subset,
+                weights = weights)
+summary(M7)
+```
+```{r}
+# M7_Normality
+plot(M7, which = 2)              # QQ plot   
+shapiro.test(residuals(M7))      # p-value < 0.05 --> violate
+```
+```{r}
+# M7_Homoscedasiticity
+plot(M7, which = 3)              # Scale-Location Plotg  
+bptest(M7)                       # Breusch-Pagan, p-value < 0.05 --> violate
+```
+#-----------------MODEL 8: Box-Cox---------------------#
+```{r}
+library(MASS)
+# Fit a linear model with the original data
+M_raw <- lm(REM.sleep.percentage ~ Age + Gender + Exercise.frequency +
+              Smoking.status + Alcohol.consumption + Caffeine.consumption,
+            data = sleep_efficiency_subset)
+# Perform Box-Cox transformation to find the optimal lambda
+boxcox_result <- boxcox(M_raw, lambda = seq(-2, 2, 0.1))
+# Identify the lambda value that maximizes the log-likelihood (best lambda)
+lambda_best <- boxcox_result$x[which.max(boxcox_result$y)]
+
+sleep_efficiency_subset$REM.sleep.percentage_transformed <- 
+  (sleep_efficiency_subset$REM.sleep.percentage^lambda_best - 1) / lambda_best
+
+M8 <- lm(REM.sleep.percentage_transformed ~ Age + Gender + Exercise.factor +
+                       Smoking.status + Alcohol.consumption + Caffeine.consumption,
+                       data = sleep_efficiency_subset)
+summary(M8)
+```
+```{r}
+# M8_Normality
+plot(M8, which = 2)                                                             # QQ plot   
+shapiro.test(residuals(M8))                                                     # p-value < 0.05 --> violate
+```
+```{r}
+# M8_Homoscedasiticity
+plot(M8, which = 3)                                                             # Scale-Location Plotg  
+bptest(M8)                                                                      # Breusch-Pagan, p-value < 0.05 --> violate
+```
+#-----------------MODEL 9: GAM---------------------#
+```{r}
+M9 <- gam(
+  REM.sleep.percentage ~ Gender + Smoking.status + Exercise.factor +
+    s(Age) + Caffeine.consumption + Alcohol.consumption,
+  data = sleep_efficiency_subset
+)                                                                               # Menrion k value
+summary(M9)
+plot(M9)
+```
+```{r}
+# M9_Normality
+qqnorm(residuals(M9))
+qqline(residuals(M9), col = "red")                                              # QQ plot   
+shapiro.test(residuals(M9))                                                     # p-value < 0.05 --> violate
+```
+```{r}
+# M9_Homoscedasiticity
+plot(fitted(M9), residuals(M9))
+abline(h = 0, col = "red")                                                      # Scale-Location Plotg  
+bptest(M9)                                                                      # Breusch-Pagan, p-value < 0.05 --> violate
+```
+#-----------------MODEL 10: splines---------------------#
+```{r}
+M10 <- lm(REM.sleep.percentage ~ Gender + Smoking.status + poly(Age, 2) + 
+     Exercise.factor + log_caffeine + log_alcohol, 
+   data = sleep_efficiency_subset)
+summary(M10)
+```
+#-----------------MODEL 11: Log Tranformation of X---------------------#
+```{r}
+sleep_efficiency_subset$log_caffeine <- log(sleep_efficiency_subset$ Caffeine.consumption + 1)           # Caffeine.consumption right-skewed --> Log transformation
+sleep_efficiency_subset$log_alcohol <- log(sleep_efficiency_subset$ Alcohol.consumption + 1)             # Alcohol.consumption right-skewed --> Log transformation
+head(sleep_efficiency_subset)
+                                                                                                         # Build a model: use poly(Exercise.frequency, 2) --> ordinal + skewed 
+M11 <- lm(
+  REM.sleep.percentage ~ poly(Age,2) + Gender + Smoking.status +
+  log_caffeine + log_alcohol + Exercise.factor,
+  data = sleep_efficiency_subset
+)      
+summary(M11)                                                                                              # Check summary
+```
+```{r}
+# M9_Normality
+qqnorm(residuals(M9))
+qqline(residuals(M9), col = "red")                                              # QQ plot   
+shapiro.test(residuals(M9))                                                     # p-value < 0.05 --> violate
+```
+```{r}
+# M9_Homoscedasiticity
+plot(fitted(M9), residuals(M9))
+abline(h = 0, col = "red")                                                      # Scale-Location Plotg  
+bptest(M9)                                                                      # Breusch-Pagan, p-value < 0.05 --> violate
+```
+#-----------------MODEL 12: spline(poly) + Exercise categorical (Reduced)---------------------#
+```{r}
+
+M12 <- lm(
+  REM.sleep.percentage ~ Gender + poly(Age, 2) + Exercise.factor +
+    log_caffeine + log_alcohol,
+  data = sleep_efficiency_subset
+)
+
+summary(M12)                                                                               # Check summary
+```
+```{r}
+# M12_Normality
+qqnorm(residuals(M12))
+qqline(residuals(M12), col = "red")                                              # QQ plot   
+shapiro.test(residuals(M12))                                                     # p-value < 0.05 --> violate
+```
+```{r}
+# M12_Homoscedasiticity
+plot(fitted(M12), residuals(M12))
+abline(h = 0, col = "red")                                                      # Scale-Location Plotg  
+bptest(M12)                                                                      # Breusch-Pagan, p-value < 0.05 --> violate
+```
+# Compare Models
+```{r}
+# R-squred
+cat("M1 R-squared:",round(summary(M1)$r.squared,3),
+    "\nM2 R-squared:",round(summary(M2)$r.squared,3),
+    "\nM3 R-squared:",round(summary(M3)$r.squared,3),
+    "\nM4 R-squared:",round(summary(M4)$r.squared,3),
+    "\nM5 R-squared:",summary(M5)$r.squared,
+    "\nM6 R-squared:",round(summary(M6)$r.squared,3),
+    "\nM7 R-squared:",round(summary(M7)$r.squared,3),
+    "\nM8 R-squared:",round(summary(M8)$r.squared,3),
+    "\nM9 R-squared:",
+    "\nM10 R-squared:",round(summary(M10)$r.squared,3),
+    "\nM11 R-squared:",round(summary(M11)$r.squared,3),
+    "\nM12 R-squared:",round(summary(M12)$r.squared,3))
+```
+```{r}
+# Adj R-squred
+cat("M1 Adj R-squared:",round(summary(M1)$adj.r.squared,3),
+    "\nM2 Adj R-squared:",round(summary(M2)$adj.r.squared,3),
+    "\nM3 Adj R-squared:",round(summary(M3)$adj.r.squared,3),
+    "\nM4 Adj R-squared:",summary(M4)$adj.r.squared,
+    "\nM5 Adj R-squared:",summary(M5)$adj.r.squared,
+    "\nM6 Adj R-squared:",round(summary(M6)$adj.r.squared,3),
+    "\nM7 Adj R-squared:",round(summary(M7)$adj.r.squared,3),
+    "\nM8 Adj R-squared:",round(summary(M8)$adj.r.squared,3),
+    "\nM9 Adj R-squared:",round(summary(M9)$r.sq,3),
+    "\nM10 Adj R-squared:",round(summary(M10)$r.sq,3),
+    "\nM11 Adj R-squared:",round(summary(M11)$r.sq,3),
+    "\nM12 Adj R-squared:",round(summary(M12)$r.sq,3))
+```
+```{r}
+# AIC
+cat("M1 AIC:",AIC(M1),
+    "\nM2 AIC:",AIC(M2),
+    "\nM3 AIC:",AIC(M3),
+    "\nM4 AIC:",AIC(M4),
+    "\nM5 AIC:",AIC(M5),
+    "\nM6 AIC:",AIC(M6),
+    "\nM7 AIC:",AIC(M7),
+    "\nM8 AIC:",AIC(M8),
+    "\nM9 AIC:",AIC(M9),
+    "\nM10 AIC:",AIC(M10),
+    "\nM11 AIC:",AIC(M11))
+```
+```{r}
+# BIC
+cat("M1 BIC:",BIC(M1),
+    "\nM2 BIC:",BIC(M2),
+    "\nM3 BIC:",BIC(M3),
+    "\nM4 BIC:",BIC(M4),
+    "\nM5 BIC:",BIC(M5),
+    "\nM6 BIC:",BIC(M6),
+    "\nM7 BIC:",BIC(M7),
+    "\nM8 BIC:",BIC(M8),
+    "\nM9 BIC:",BIC(M9),
+    "\nM10 BIC:",BIC(M10),
+    "\nM11 BIC:",BIC(M11))
+```
+################################
+# Step 6: Improve the model
+################################
+```{r}
+M_stepwise <- stepAIC(M_12, direction = "both", trace = FALSE)
+summary(M_stepwise)
+round(confint(M_stepwise),3)
+```
+################################
+# Step 8: Compare Models
+################################
+```{r}
+cat("M3 R-squared:",round(summary(M3)$r.squared,3),
+    "\nM_stepwise R-squared:",round(summary(M_stepwise)$r.squared,3))
+cat("\nM3 Adj R-squared:",round(summary(M3)$adj.r.squared,3),
+    "\nM_stepwise Adj R-squared:",round(summary(M_stepwise)$adj.r.squared,3))
+cat("\nM3 AIC:",AIC(M3),
+    "\nM_stepwise AIC:",AIC(M_stepwise))
+cat("\nM_stepwise BIC:",BIC(M3),
+    "\nM_stepwise BIC:",BIC(M_stepwise))
+```
+# Detach the data
+```{r }
+detach(sleep_efficiency_new)
+```
