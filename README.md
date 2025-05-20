@@ -23,7 +23,7 @@ This project explores how lifestyle behaviors (e.g., caffeine, alcohol, smoking,
 2. Open `app.R` in RStudio
 3. Click “Run App” 
 
-✨ Key Takeaways
+## ✨ Key Takeaways
 1. Converted non-linear variables into categorical factors to improve the model explaination rate from 10% to 17%
 2. Diagnosed and removed influential outliers using Cook's distance and leverage
 3. Published interactive visualizations for better accessibility
