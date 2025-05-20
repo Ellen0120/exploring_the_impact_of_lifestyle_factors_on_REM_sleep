@@ -17,22 +17,14 @@ This project explores how lifestyle behaviors (e.g., caffeine, alcohol, smoking,
 ## 📊 Live App<br>
 👉 [Shiny App](https://ellenlee.shinyapps.io/REM_ShinyApp)
 
-## 📎 Report & Analysis<br>
-📘 [Final Project Report (PDF)](link-to-pdf-if-hosted)  
-📗 [R Markdown Report](Sleep_Efficiency%20(Revised).Rmd)
-
 ## 💻 How to Run
-1. Clone the repo:
-   ```bash
-   git clone https://github.com/Ellen0120/REM-sleep-analysis.git
-Open app.R in RStudio
-
-Click “Run App” to launch the Shiny dashboard
+1. Download `Sleep_Efficiency.csv` and `app.R` file and save it under a file<br>
+** Change the file name if needed
+2. Open `app.R` in RStudio
+3. Click “Run App” 
 
 ✨ Key Takeaways
-Converted non-linear variables into categorical factors to improve interpretability
-
-Diagnosed and removed influential outliers using Cook's distance and leverage
-
-Published interactive visualizations for better accessibility
+1. Converted non-linear variables into categorical factors to improve the model explaination rate from 10% to 17%
+2. Diagnosed and removed influential outliers using Cook's distance and leverage
+3. Published interactive visualizations for better accessibility
 
